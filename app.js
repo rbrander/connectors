@@ -5,8 +5,16 @@ const ctx = canvas.getContext('2d');
 const CELL_SIZE = 100;
 const HALF_CELL = ~~(CELL_SIZE / 2);
 const NODE_RADIUS = ~~(CELL_SIZE / 8); // a node is the small circle in the middle of a cell
-const NUM_COLS = ~~(canvas.width / CELL_SIZE);
-const NUM_ROWS = ~~(canvas.height / CELL_SIZE);
+let NUM_COLS = ~~(canvas.width / CELL_SIZE);
+let NUM_ROWS = ~~(canvas.height / CELL_SIZE);
+
+const TITLE_DURATION = 4000;
+const TITLE_FONT_SIZE = 50; // in pixels
+const PADDING = 10; // pixels
+const TITLE_HEIGHT = TITLE_FONT_SIZE + PADDING * 2
+const HALF_TITLE_FONT_SIZE = ~~(TITLE_FONT_SIZE / 2);
+const HALF_TITLE_DURATION = ~~(TITLE_DURATION / 2);
+
 
 function Cell(x, y) {
   this.x = x;
@@ -28,6 +36,11 @@ const state = {
     yCell: undefined,
     isDown: false
   },
+  touch: {
+    isTouching: false,
+    x: undefined,
+    y: undefined
+  },
   snapCell: undefined
 };
 
@@ -44,11 +57,11 @@ const update = (time) => {
   // the mouse is within range of the current cell
 
   // All the work below is requiring the mouse position, so bail if we don't have it
-  if (!mouse.hasMouse) return;
+  if (!mouse.hasMouse || mouse.y <= TITLE_HEIGHT) return;
 
   const currCell = path.pop();
   const currCellX = currCell.x * CELL_SIZE + HALF_CELL;
-  const currCellY = currCell.y * CELL_SIZE + HALF_CELL;
+  const currCellY = currCell.y * CELL_SIZE + HALF_CELL + TITLE_HEIGHT;
   state.currCell = {
     cell: currCell,
     x: currCellX,
@@ -76,9 +89,9 @@ const update = (time) => {
   // check if it is a neighbour of the current cell
   // and snap to it if it is
   state.snapCell = undefined;
-  if (isInNodeRadius(mouse.x, mouse.y)) {
+  if (isInNodeRadius(mouse.x, mouse.y - TITLE_HEIGHT)) {
     const mouseCellX = ~~(mouse.x / CELL_SIZE);
-    const mouseCellY = ~~(mouse.y / CELL_SIZE);
+    const mouseCellY = ~~((mouse.y - TITLE_HEIGHT) / CELL_SIZE);
     const isCurrCell = (
       (mouseCellX === currCell.x) &&
       (mouseCellY === currCell.y)
@@ -118,7 +131,7 @@ const update = (time) => {
 
 const drawActiveLine = () => {
   const { mouse, snapCell } = state;
-  if (!mouse.hasMouse) {
+  if (!mouse.hasMouse || mouse.y <= TITLE_HEIGHT) {
     // mouse hasn't enter the canvas, or mouse has left the canvas
     return;
   }
@@ -132,15 +145,19 @@ const drawActiveLine = () => {
     ctx.strokeStyle = 'red';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(currCell.x * CELL_SIZE + HALF_CELL, currCell.y * CELL_SIZE + HALF_CELL);
-    ctx.lineTo(snapCell.x * CELL_SIZE + HALF_CELL, snapCell.y * CELL_SIZE + HALF_CELL);
+    const startX = currCell.x * CELL_SIZE + HALF_CELL;
+    const startY = currCell.y * CELL_SIZE + HALF_CELL + TITLE_HEIGHT;
+    ctx.moveTo(startX, startY);
+    const endX = snapCell.x * CELL_SIZE + HALF_CELL;
+    const endY = snapCell.y * CELL_SIZE + HALF_CELL + TITLE_HEIGHT;
+    ctx.lineTo(endX, endY);
     ctx.stroke();
   } else {
     ctx.strokeStyle = 'blue';
     ctx.lineWidth = 3;
     ctx.beginPath();
     const startX = currCell.x * CELL_SIZE + HALF_CELL;
-    const startY = currCell.y * CELL_SIZE + HALF_CELL;
+    const startY = currCell.y * CELL_SIZE + HALF_CELL + TITLE_HEIGHT;
     const endX = mouse.x;
     const endY = mouse.y;
     if (Math.abs(endX - startX) <= CELL_SIZE && Math.abs(endY - startY) <= CELL_SIZE) {
@@ -165,9 +182,9 @@ const drawActiveLine = () => {
 const calcCellCenter = (cellIndex) => cellIndex * CELL_SIZE + HALF_CELL;
 const drawPathLine = (startCell, endCell) => {
   const startX = calcCellCenter(startCell.x);
-  const startY = calcCellCenter(startCell.y);
+  const startY = calcCellCenter(startCell.y) + TITLE_HEIGHT;
   const endX = calcCellCenter(endCell.x);
-  const endY = calcCellCenter(endCell.y);
+  const endY = calcCellCenter(endCell.y) + TITLE_HEIGHT;
 
   ctx.lineWidth = CELL_SIZE * 0.1;
   ctx.strokeStyle = 'green';
@@ -198,7 +215,7 @@ const drawCells = () => {
   state.cells.forEach((col, cellX) => {
     col.forEach((cell, cellY) => {
       const x = cellX * CELL_SIZE + offset;
-      const y = cellY * CELL_SIZE + offset;
+      const y = cellY * CELL_SIZE + offset + TITLE_HEIGHT;
       if (cell.selected) {
 	ctx.fillStyle = 'blue';
         ctx.beginPath();
@@ -223,11 +240,12 @@ const clearBackground = () => {
 };
 
 const drawText = () => {
-  const { mouse } = state;
+  const { mouse, touch } = state;
   const FONT_SIZE = 30; // pixels
   const SPACE_BETWEEN_LINES = 10; // pixels
   ctx.font = `${FONT_SIZE}px Arial`;
   ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
   ctx.fillStyle = 'white';
   ctx.lineWidth = 3;
   ctx.strokeStyle = 'black';
@@ -238,21 +256,69 @@ const drawText = () => {
     ctx.fillText(txt, x, y);
   };
   const messages = [];
-  /*
-  if (mouse.hasMouse) {
-    messages.push(`Mouse (${mouse.y}, ${mouse.x}) [${mouse.xCell}, ${mouse.yCell}]`);
+  if (touch.isTouching) {
+    messages.push(`Touching at (${touch.x}, ${touch.y})`);
   }
-  */
   messages.forEach(text);
+};
+
+const drawTitle = (time) => {
+  // In the beginning, the text will fade in, at the center
+  // after holding for a moment, the text will float upwards
+  //to the top of the screen
+  const phases = [
+    { name: 'fade-in', endTime: ~~(TITLE_DURATION / 3) },
+    { name: 'hold', endTime: ~~(TITLE_DURATION * 2 / 3) },
+    { name: 'float-up', startTime: ~~(TITLE_DURATION * 2 / 3), endTime: TITLE_DURATION },
+    { name: 'hold-up', endTime: undefined }
+  ];
+  // find the first phase that meets the time criteria
+  const currPhase = phases.find(phase => (phase.endTime === undefined || phase.endTime > time));
+
+  ctx.font = `${TITLE_FONT_SIZE}px Arial`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'white';
+  let textX = ~~(canvas.width / 2);
+  let textY = ~~(canvas.height / 2);
+  switch (currPhase.name) {
+    case 'fade-in':
+      ctx.fillStyle = `rgba(255, 255, 255, ${time / currPhase.endTime})`;
+      break;
+    case 'hold':
+      break;
+    case 'float-up':
+      let relativeTime = time - currPhase.startTime;
+      let totalTime = currPhase.endTime - currPhase.startTime;
+      let pctComplete = relativeTime / totalTime;
+      // the translation will go from (canvas.height/2) to ((50/2) + 10)
+      // where 50 is the font size, and 10 is the padding from the top
+      let start = ~~(canvas.height / 2);
+      let end = HALF_TITLE_FONT_SIZE + PADDING;
+      let distance = start - end;
+      textY = start - (relativeTime * (distance/totalTime));
+      break;
+    case 'hold-up':
+      textY = HALF_TITLE_FONT_SIZE + PADDING;
+      break;
+    default:
+      throw new Error('Unknown phase!', currPhase);
+      break;
+  }
+  ctx.fillText('Connectors!', textX, textY);
 };
 
 const draw = (time) => {
   clearBackground();
-  drawPath();
-  drawCells();
-  drawActiveLine();
-  drawText();
+  drawTitle(time);
+  if (time > TITLE_DURATION) {
+    drawPath();
+    drawCells();
+    drawActiveLine();
+    drawText();
+  }
 };
+
 
 const loop = (time) => {
   update(time);
@@ -289,15 +355,53 @@ const onMouseOut = () => {
   });
 };
 
-const init = () => {
-  console.log('Connectors!');
+const onTouchStart = (e) => {
+  const { clientX, clientY } = e.touches[0];
+  Object.assign(state.touch, { isTouching: true, x: clientX, y: clientY });
+};
+
+const onTouchEnd = (e) => {
+  Object.assign(state.touch, { isTouching: false, x: undefined, y: undefined });
+};
+
+const onTouchMove = (e) => {
+  const { clientX, clientY } = e.touches[0];
+  Object.assign(state.touch, { x: clientX, y: clientY });
+  Object.assign(state.mouse, {
+    hasMouse: true,
+    x: clientX,
+    y: clientY,
+    xCell: ~~(clientX / CELL_SIZE),
+    yCell: ~~(clientY / CELL_SIZE)
+  });
+};
+
+const onResize = () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  NUM_COLS = ~~(canvas.width / CELL_SIZE);
+  NUM_ROWS = ~~((canvas.height - TITLE_HEIGHT) / CELL_SIZE);
+  state.cells = new Array(NUM_COLS).fill()
+    .map((_, x) => new Array(NUM_ROWS).fill()
+    .map((_, y) => new Cell(x, y)));
+  state.path = [];
   const firstCell = state.cells[0][0];
   firstCell.selected = true;
   state.path.push(firstCell);
+  state.snapCell = undefined;
+};
+
+const init = () => {
+  console.log('Connectors!');
   canvas.addEventListener('mousedown', onMouseDown);
   canvas.addEventListener('mouseup', onMouseUp);
   canvas.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('mouseout', onMouseOut);
+  canvas.addEventListener('touchstart', onTouchStart);
+  canvas.addEventListener('touchend', onTouchEnd);
+  canvas.addEventListener('touchmove', onTouchMove);
+  window.addEventListener('resize', onResize);
+  onResize();
   requestAnimationFrame(loop);
 };
 
