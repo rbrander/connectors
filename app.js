@@ -1,4 +1,11 @@
 // app.js -- connectors
+/*
+TODO:
+- allow going backwards by toggling the current node
+- long distance snaping
+
+*/
+
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
@@ -45,7 +52,7 @@ const state = {
 };
 
 const update = (time) => {
-  const { mouse, path } = state;
+  const { mouse, touch, path } = state;
 
   // if the mouse is within 5 pixels of the center of a cell
   // that is not the current, snap to it
@@ -57,16 +64,13 @@ const update = (time) => {
   // the mouse is within range of the current cell
 
   // All the work below is requiring the mouse position, so bail if we don't have it
-  if (!mouse.hasMouse || mouse.y <= TITLE_HEIGHT) return;
+  const isMouseInRange = (mouse.hasMouse && mouse.y > TITLE_HEIGHT);
+  const isTouchingInRange = (touch.isTouching && touch.y > TITLE_HEIGHT);
+  if (!isMouseInRange && !isTouchingInRange) return;
 
   const currCell = path.pop();
   const currCellX = currCell.x * CELL_SIZE + HALF_CELL;
   const currCellY = currCell.y * CELL_SIZE + HALF_CELL + TITLE_HEIGHT;
-  state.currCell = {
-    cell: currCell,
-    x: currCellX,
-    y: currCellY
-  };
 
   const snapDistance = NODE_RADIUS;
   const xDiff = (mouse.x - currCellX);
@@ -85,13 +89,17 @@ const update = (time) => {
     return length <= NODE_RADIUS;
   };
 
+  // determine if this is a mouse event, or touch event, defaulting to mouse
+  const isMouseEvent = mouse.hasMouse && !touch.isTouching;
+  const eventSource = isMouseEvent ? mouse : touch;
+
   // If the mouse is in a node,
   // check if it is a neighbour of the current cell
   // and snap to it if it is
   state.snapCell = undefined;
-  if (isInNodeRadius(mouse.x, mouse.y - TITLE_HEIGHT)) {
-    const mouseCellX = ~~(mouse.x / CELL_SIZE);
-    const mouseCellY = ~~((mouse.y - TITLE_HEIGHT) / CELL_SIZE);
+  if (isInNodeRadius(eventSource.x, eventSource.y - TITLE_HEIGHT)) {
+    const mouseCellX = ~~(eventSource.x / CELL_SIZE);
+    const mouseCellY = ~~((eventSource.y - TITLE_HEIGHT) / CELL_SIZE);
     const isCurrCell = (
       (mouseCellX === currCell.x) &&
       (mouseCellY === currCell.y)
@@ -122,7 +130,7 @@ const update = (time) => {
 
   // If the snapCell is assigned, and the mouse is down
   // then add the cell to the path
-  if (state.snapCell instanceof Cell && mouse.isDown) {
+  if (state.snapCell instanceof Cell && (mouse.isDown||touch.isTouching)) {
     state.snapCell.selected = true;
     path.push(state.snapCell);
     state.snapCell = undefined;
@@ -341,7 +349,7 @@ const onMouseMove = () => {
     x: offsetX,
     y: offsetY,
     xCell: ~~(offsetX / CELL_SIZE),
-    yCell: ~~(offsetY / CELL_SIZE)
+    yCell: ~~((offsetY - TITLE_HEIGHT) / CELL_SIZE)
   });
 };
 
@@ -357,23 +365,33 @@ const onMouseOut = () => {
 
 const onTouchStart = (e) => {
   const { clientX, clientY } = e.touches[0];
-  Object.assign(state.touch, { isTouching: true, x: clientX, y: clientY });
+  Object.assign(state.touch, {
+    isTouching: true,
+    x: clientX,
+    y: clientY,
+    xCell: ~~(clientX / CELL_SIZE),
+    yCell: ~~((clientY - TITLE_HEIGHT) / CELL_SIZE)
+  });
 };
 
 const onTouchEnd = (e) => {
-  Object.assign(state.touch, { isTouching: false, x: undefined, y: undefined });
+  Object.assign(state.touch, {
+    isTouching: false,
+    x: undefined,
+    y: undefined,
+    xCell: undefined,
+    yCell: undefined
+  });
 };
 
 const onTouchMove = (e) => {
   const { clientX, clientY } = e.touches[0];
-  Object.assign(state.touch, { x: clientX, y: clientY });
-  Object.assign(state.mouse, {
-    hasMouse: true,
+  Object.assign(state.touch, {
     x: clientX,
     y: clientY,
     xCell: ~~(clientX / CELL_SIZE),
-    yCell: ~~(clientY / CELL_SIZE)
-  });
+    yCell: ~~((clientY - TITLE_HEIGHT) / CELL_SIZE)
+  })
 };
 
 const onResize = () => {
